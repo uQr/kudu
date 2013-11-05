@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO;
 using Kudu.Contracts.Infrastructure;
 using Kudu.Contracts.Settings;
@@ -69,6 +68,8 @@ namespace Kudu.Core.SourceControl.Git
             ITracer tracer = _traceFactory.GetTracer();
             using (tracer.Step("GitExeServer.Receive"))
             {
+                GitExeRepository.FixupPostReceiveHook(_repositoryFactory.GetRepository());
+
                 ServiceRpc(tracer, "receive-pack", inputStream, outputStream);
             }
         }

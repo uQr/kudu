@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Abstractions;
 using System.Linq;
 using System.Text;
 using Kudu.Contracts.Settings;
@@ -28,6 +29,12 @@ namespace Kudu.Core.SourceControl.Git
         };
 
         private static readonly string[] _lockFileNames = new[] { "index.lock", "HEAD.lock" };
+
+        private static readonly Lazy<string> _postReceiveContent = new Lazy<string>(() => @"#!/bin/sh
+read i
+echo $i > pushinfo
+" + KnownEnvironment.KUDUCOMMAND + "\n"
+        );
 
         private readonly GitExecutable _gitExe;
         private readonly ITraceFactory _tracerFactory;
@@ -169,12 +176,7 @@ fi" + "\n";
                 {
                     FileSystemHelpers.EnsureDirectory(Path.GetDirectoryName(PostReceiveHookPath));
 
-                    string content = @"#!/bin/sh
-read i
-echo $i > pushinfo
-" + KnownEnvironment.KUDUCOMMAND + "\n";
-
-                    File.WriteAllText(PostReceiveHookPath, content);
+                    File.WriteAllText(PostReceiveHookPath, _postReceiveContent.Value);
                 }
 
                 // NOTE: don't add any new init steps after creating the post receive hook,
@@ -422,6 +424,27 @@ echo $i > pushinfo
             }
 
             return Enumerable.Empty<string>();
+        }
+
+        // we are doing a fixup for post-receive hook to ensure quotes
+        // this only applies pre-S18 sites; for simplicity, anything before 2013
+        internal static void FixupPostReceiveHook(IRepository repository, IFileSystem fileSystem = null)
+        {
+            var gitExeRepository = repository as GitExeRepository;
+            if (gitExeRepository != null)
+            {
+                fileSystem = fileSystem ?? new FileSystem();
+
+                // only fix if file exists
+                if (fileSystem.File.Exists(gitExeRepository.PostReceiveHookPath))
+                {
+                    DateTime lastWriteTime = fileSystem.File.GetLastWriteTimeUtc(gitExeRepository.PostReceiveHookPath);
+                    if (lastWriteTime.Year < 2013)
+                    {
+                        fileSystem.File.WriteAllText(gitExeRepository.PostReceiveHookPath, _postReceiveContent.Value);
+                    }
+                }
+            }
         }
 
         private string Execute(string arguments, params object[] args)

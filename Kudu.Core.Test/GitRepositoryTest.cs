@@ -1,4 +1,6 @@
 ﻿using System;
+using System.IO;
+using System.IO.Abstractions;
 using System.Threading;
 using System.Threading.Tasks;
 using Kudu.Contracts.Settings;
@@ -147,6 +149,45 @@ Date:   Thu Jul 7 19:05:40 2011 -0700
             // Assert
             Assert.NotNull(repository);
             Assert.Equal(initialized ? 0 : 1, calls);
+        }
+
+        [Theory]
+        [InlineData(false, null)]
+        [InlineData(true, "12/31/2012")]
+        [InlineData(true, "1/1/2013")]
+        public void FixupPostReceiveHookTest(bool exists, string lastWriteTimeString)
+        {
+            var lastWriteTime = !String.IsNullOrEmpty(lastWriteTimeString) ? DateTime.Parse(lastWriteTimeString).ToUniversalTime() : DateTime.MinValue;
+            var repositoryPath = @"d:\home\site\repository";
+            var postReceivePath = Path.Combine(repositoryPath, ".git", "hooks", "post-receive");
+            var fileSystem = new Mock<IFileSystem>();
+            var fileBase = new Mock<FileBase>();
+            var settings = new Mock<IDeploymentSettingsManager>();
+            var trace = new Mock<ITraceFactory>();
+            var environment = new Mock<IEnvironment>();
+
+            // setup
+            environment.SetupGet(e => e.RepositoryPath)
+                       .Returns(repositoryPath);
+            fileSystem.SetupGet(fs => fs.File)
+                      .Returns(fileBase.Object);
+            fileBase.Setup(f => f.Exists(postReceivePath))
+                    .Returns(exists);
+
+            if (exists)
+            {
+                fileBase.Setup(f => f.GetLastWriteTimeUtc(postReceivePath))
+                        .Returns(lastWriteTime);
+            }
+
+            // Test
+            var repository = new GitExeRepository(environment.Object, settings.Object, trace.Object);
+            GitExeRepository.FixupPostReceiveHook(repository, fileSystem.Object);
+
+            // verify
+            bool writeAllTextCalled = exists && lastWriteTime.Year < 2013;
+            fileBase.Verify(f => f.WriteAllText(postReceivePath, It.IsAny<string>()), 
+                writeAllTextCalled ? Times.Once() : Times.Never());
         }
     }
 }
